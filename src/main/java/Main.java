@@ -8,7 +8,7 @@ public class Main {
         String userinput = sc.nextLine();
         // String[] Command = userinput.split(" ");
         System.out.println(userinput + ": command not found");
-        System.out.print("$ ");
+        System.out.print("$");
         sc.close();
 
     }
