@@ -21,11 +21,15 @@ public class Main {
         sc.close();
     }
 
+    private static final java.util.List<String> BUILTINS = java.util.Arrays.asList("exit", "echo", "type");
+
     private static void executeCommand(String command, String[] parts) {
         if (command.equals("exit")) {
             handleExit(parts);
         } else if (command.equals("echo")) {
             handleEcho(parts);
+        } else if (command.equals("type")) {
+            handleType(parts);
         } else {
             System.out.println(command + ": command not found");
         }
@@ -46,5 +50,16 @@ public class Main {
     private static void handleEcho(String[] parts) {
         String output = String.join(" ", java.util.Arrays.copyOfRange(parts, 1, parts.length));
         System.out.println(output);
+    }
+
+    private static void handleType(String[] parts) {
+        if (parts.length > 1) {
+            String targetCmd = parts[1];
+            if (BUILTINS.contains(targetCmd)) {
+                System.out.println(targetCmd + " is a shell builtin");
+            } else {
+                System.out.println(targetCmd + ": not found");
+            }
+        }
     }
 }
