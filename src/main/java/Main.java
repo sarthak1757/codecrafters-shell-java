@@ -9,9 +9,13 @@ public class Main {
                 break;
             }
             String userinput = sc.nextLine();
+            if(userinput.equals("exit")) {
+                break;
+            }
             System.out.println(userinput + ": command not found");
         }
         sc.close();
 
     }
 }
+q
