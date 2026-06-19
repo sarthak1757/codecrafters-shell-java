@@ -2,6 +2,8 @@ import java.util.Scanner;
 import java.io.File;
 
 public class Main {
+    private static String currentDirectory = System.getProperty("user.dir");
+
     public static void main(String[] args) throws Exception {
         Scanner sc = new Scanner(System.in);
         while (true) {
@@ -22,7 +24,7 @@ public class Main {
         sc.close();
     }
 
-    private static final java.util.List<String> BUILTINS = java.util.Arrays.asList("exit", "echo", "type");
+    private static final java.util.List<String> BUILTINS = java.util.Arrays.asList("exit", "echo", "type", "pwd");
 
     private static void executeCommand(String command, String[] parts) {
         if (command.equals("exit")) {
@@ -31,11 +33,14 @@ public class Main {
             handleEcho(parts);
         } else if (command.equals("type")) {
             handleType(parts);
+        } else if (command.equals("pwd")) {
+            handlePwd(parts);
         } else {
             String path = getExecutablePath(command);
             if (path != null) {
                 try {
                     ProcessBuilder pb = new ProcessBuilder(parts);
+                    pb.directory(new File(currentDirectory));
                     pb.inheritIO();
                     Process process = pb.start();
                     process.waitFor();
@@ -79,6 +84,10 @@ public class Main {
                 }
             }
         }
+    }
+
+    private static void handlePwd(String[] parts) {
+        System.out.println(currentDirectory);
     }
 
     private static String getExecutablePath(String command) {
