@@ -59,23 +59,28 @@ public class Main {
             if (BUILTINS.contains(targetCmd)) {
                 System.out.println(targetCmd + " is a shell builtin");
             } else {
-                System.out.println(targetCmd + ": not found");
+                String exePath = getExecutablePath(targetCmd);
+                if (exePath != null) {
+                    System.out.println(targetCmd + " is " + exePath);
+                } else {
+                    System.out.println(targetCmd + ": not found");
+                }
             }
         }
     }
-    private static void handlePath(String[] parts){
-        String command = parts[1];
+
+    private static String getExecutablePath(String command) {
         String path = System.getenv("PATH");
-        String[] pathelements = path.split(":");
-        for(String p : pathelements){
-            System.out.println("PATH =");
-            System.out.println(path);
-            String filepath = p+"/"+ command;
-            System.out.println(filepath);
-            File file = new File(filepath);
-            if(file.exists()){
-                System.out.println(filepath);
+        if (path == null || path.isEmpty()) {
+            return null;
+        }
+        String[] pathDirs = path.split(":");
+        for (String dir : pathDirs) {
+            File file = new File(dir, command);
+            if (file.exists() && file.isFile() && file.canExecute()) {
+                return file.getAbsolutePath();
             }
         }
+        return null;
     }
 }
