@@ -32,7 +32,19 @@ public class Main {
         } else if (command.equals("type")) {
             handleType(parts);
         } else {
-            System.out.println(command + ": command not found");
+            String path = getExecutablePath(command);
+            if (path != null) {
+                try {
+                    ProcessBuilder pb = new ProcessBuilder(parts);
+                    pb.inheritIO();
+                    Process process = pb.start();
+                    process.waitFor();
+                } catch (Exception e) {
+                    System.out.println(command + ": command not found");
+                }
+            } else {
+                System.out.println(command + ": command not found");
+            }
         }
     }
 
@@ -70,6 +82,13 @@ public class Main {
     }
 
     private static String getExecutablePath(String command) {
+        if (command.contains("/")) {
+            File file = new File(command);
+            if (file.exists() && file.isFile() && file.canExecute()) {
+                return file.getAbsolutePath();
+            }
+            return null;
+        }
         String path = System.getenv("PATH");
         if (path == null || path.isEmpty()) {
             return null;
