@@ -93,15 +93,31 @@ public class Main {
         System.out.println(currentDirectory);
     }
 
-    private static void handleCD(String[] parts){
-        if(parts.length>1){
-            String targetDir = parts[1];
-            File targetDirFile=new File(targetDir);
-            if(targetDirFile.exists() && targetDirFile.isDirectory()){
-                currentDirectory = targetDirFile.getAbsolutePath();
-            }else{
+    private static void handleCD(String[] parts) {
+        String targetDir = "~";
+        if (parts.length > 1) {
+            targetDir = parts[1];
+        }
+        File targetDirFile;
+        if (targetDir.equals("~")) {
+            targetDirFile = new File(System.getenv("HOME"));
+        } else if (targetDir.startsWith("~/")) {
+            targetDirFile = new File(System.getenv("HOME"), targetDir.substring(2));
+        } else if (targetDir.startsWith("/")) {
+            targetDirFile = new File(targetDir);
+        } else {
+            targetDirFile = new File(currentDirectory, targetDir);
+        }
+
+        try {
+            File canonicalFile = targetDirFile.getCanonicalFile();
+            if (canonicalFile.exists() && canonicalFile.isDirectory()) {
+                currentDirectory = canonicalFile.getAbsolutePath();
+            } else {
                 System.out.println("cd: " + targetDir + ": No such file or directory");
             }
+        } catch (Exception e) {
+            System.out.println("cd: " + targetDir + ": No such file or directory");
         }
     }
 
