@@ -12,11 +12,11 @@ public class Main {
                 break;
             }
             String userinput = sc.nextLine();
-            String trimmedInput = userinput.trim();
-            if (trimmedInput.isEmpty()) {
+            java.util.List<String> parsed = parseCommandLine(userinput);
+            if (parsed.isEmpty()) {
                 continue;
             }
-            String[] parts = trimmedInput.split("\\s+");
+            String[] parts = parsed.toArray(new String[0]);
             String command = parts[0];
             
             executeCommand(command, parts);
@@ -27,32 +27,38 @@ public class Main {
     private static final java.util.List<String> BUILTINS = java.util.Arrays.asList("exit", "echo", "type", "pwd","cd");
 
     private static void executeCommand(String command, String[] parts) {
-        if (command.equals("exit")) {
-            handleExit(parts);
-        } else if (command.equals("echo")) {
-            handleEcho(parts);
-        } else if (command.equals("type")) {
-            handleType(parts);
-        } else if (command.equals("pwd")) {
-            handlePwd(parts);
-        } else if(command.equals("cd")){
-            handleCD(parts);
-        }
-         else {
-            String path = getExecutablePath(command);
-            if (path != null) {
-                try {
-                    ProcessBuilder pb = new ProcessBuilder(parts);
-                    pb.directory(new File(currentDirectory));
-                    pb.inheritIO();
-                    Process process = pb.start();
-                    process.waitFor();
-                } catch (Exception e) {
+        switch (command) {
+            case "exit":
+                handleExit(parts);
+                break;
+            case "echo":
+                handleEcho(parts);
+                break;
+            case "type":
+                handleType(parts);
+                break;
+            case "pwd":
+                handlePwd(parts);
+                break;
+            case "cd":
+                handleCD(parts);
+                break;
+            default:
+                String path = getExecutablePath(command);
+                if (path != null) {
+                    try {
+                        ProcessBuilder pb = new ProcessBuilder(parts);
+                        pb.directory(new File(currentDirectory));
+                        pb.inheritIO();
+                        Process process = pb.start();
+                        process.waitFor();
+                    } catch (Exception e) {
+                        System.out.println(command + ": command not found");
+                    }
+                } else {
                     System.out.println(command + ": command not found");
                 }
-            } else {
-                System.out.println(command + ": command not found");
-            }
+                break;
         }
     }
 
@@ -141,5 +147,47 @@ public class Main {
             }
         }
         return null;
+    }
+
+    private static java.util.List<String> parseCommandLine(String input) {
+        java.util.List<String> args = new java.util.ArrayList<>();
+        StringBuilder current = new StringBuilder();
+        boolean inSingleQuotes = false;
+        boolean inArg = false;
+
+        for (int i = 0; i < input.length(); i++) {
+            char c = input.charAt(i);
+            if (inSingleQuotes) {
+                if (c == '\'') {
+                    inSingleQuotes = false;
+                } else {
+                    current.append(c);
+                }
+            } else {
+                if (c == '\'') {
+                    inSingleQuotes = true;
+                    inArg = true;
+                } else if (c == '\\') {
+                    if (i + 1 < input.length()) {
+                        i++;
+                        current.append(input.charAt(i));
+                        inArg = true;
+                    }
+                } else if (Character.isWhitespace(c)) {
+                    if (inArg) {
+                        args.add(current.toString());
+                        current.setLength(0);
+                        inArg = false;
+                    }
+                } else {
+                    current.append(c);
+                    inArg = true;
+                }
+            }
+        }
+        if (inArg) {
+            args.add(current.toString());
+        }
+        return args;
     }
 }
