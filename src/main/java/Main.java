@@ -153,19 +153,42 @@ public class Main {
         java.util.List<String> args = new java.util.ArrayList<>();
         StringBuilder current = new StringBuilder();
         boolean inSingleQuotes = false;
+        boolean inDoubleQuotes = false;
         boolean inArg = false;
 
         for (int i = 0; i < input.length(); i++) {
             char c = input.charAt(i);
+
             if (inSingleQuotes) {
                 if (c == '\'') {
                     inSingleQuotes = false;
                 } else {
                     current.append(c);
                 }
+            } else if (inDoubleQuotes) {
+                if (c == '"') {
+                    inDoubleQuotes = false;
+                } else if (c == '\\') {
+                    if (i + 1 < input.length()) {
+                        char next = input.charAt(i + 1);
+                        if (next == '$' || next == '`' || next == '"' || next == '\\' || next == '\n') {
+                            current.append(next);
+                            i++;
+                        } else {
+                            current.append(c);
+                        }
+                    } else {
+                        current.append(c);
+                    }
+                } else {
+                    current.append(c);
+                }
             } else {
                 if (c == '\'') {
                     inSingleQuotes = true;
+                    inArg = true;
+                } else if (c == '"') {
+                    inDoubleQuotes = true;
                     inArg = true;
                 } else if (c == '\\') {
                     if (i + 1 < input.length()) {
