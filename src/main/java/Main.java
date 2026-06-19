@@ -24,7 +24,7 @@ public class Main {
         sc.close();
     }
 
-    private static final java.util.List<String> BUILTINS = java.util.Arrays.asList("exit", "echo", "type", "pwd");
+    private static final java.util.List<String> BUILTINS = java.util.Arrays.asList("exit", "echo", "type", "pwd","cd");
 
     private static void executeCommand(String command, String[] parts) {
         if (command.equals("exit")) {
@@ -35,7 +35,10 @@ public class Main {
             handleType(parts);
         } else if (command.equals("pwd")) {
             handlePwd(parts);
-        } else {
+        } else if(command.equals("cd")){
+            handleCD(parts);
+        }
+         else {
             String path = getExecutablePath(command);
             if (path != null) {
                 try {
@@ -88,6 +91,18 @@ public class Main {
 
     private static void handlePwd(String[] parts) {
         System.out.println(currentDirectory);
+    }
+
+    private static void handleCD(String[] parts){
+        if(parts.length>1){
+            String targetDir = parts[1];
+            File targetDirFile=new File(targetDir);
+            if(targetDirFile.exists() && targetDirFile.isDirectory()){
+                currentDirectory = targetDirFile.getAbsolutePath();
+            }else{
+                System.out.println("cd: " + targetDir + ": No such file or directory");
+            }
+        }
     }
 
     private static String getExecutablePath(String command) {
