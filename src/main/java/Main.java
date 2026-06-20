@@ -12,53 +12,83 @@ public class Main {
                 break;
             }
             String userinput = sc.nextLine();
-            java.util.List<String> parsed = parseCommandLine(userinput);
-            if (parsed.isEmpty()) {
+            ParsedCommand parsed = parseCommandLine(userinput);
+            if (parsed.args.isEmpty()) {
                 continue;
             }
-            String[] parts = parsed.toArray(new String[0]);
+            String[] parts = parsed.args.toArray(new String[0]);
             String command = parts[0];
             
-            executeCommand(command, parts);
+            executeCommand(command, parts, parsed.redirectFile);
         }
         sc.close();
     }
 
     private static final java.util.List<String> BUILTINS = java.util.Arrays.asList("exit", "echo", "type", "pwd","cd");
 
-    private static void executeCommand(String command, String[] parts) {
-        switch (command) {
-            case "exit":
-                handleExit(parts);
-                break;
-            case "echo":
-                handleEcho(parts);
-                break;
-            case "type":
-                handleType(parts);
-                break;
-            case "pwd":
-                handlePwd(parts);
-                break;
-            case "cd":
-                handleCD(parts);
-                break;
-            default:
-                String path = getExecutablePath(command);
-                if (path != null) {
-                    try {
-                        ProcessBuilder pb = new ProcessBuilder(parts);
-                        pb.directory(new File(currentDirectory));
-                        pb.inheritIO();
-                        Process process = pb.start();
-                        process.waitFor();
-                    } catch (Exception e) {
+    private static void executeCommand(String command, String[] parts, String redirectFile) {
+        java.io.PrintStream originalOut = System.out;
+        java.io.PrintStream fileOut = null;
+        if (redirectFile != null) {
+            try {
+                File file = new File(redirectFile);
+                File parent = file.getParentFile();
+                if (parent != null && !parent.exists()) {
+                    parent.mkdirs();
+                }
+                fileOut = new java.io.PrintStream(new java.io.FileOutputStream(file));
+                System.setOut(fileOut);
+            } catch (Exception e) {
+                System.err.println(e.getMessage());
+                return;
+            }
+        }
+
+        try {
+            switch (command) {
+                case "exit":
+                    handleExit(parts);
+                    break;
+                case "echo":
+                    handleEcho(parts);
+                    break;
+                case "type":
+                    handleType(parts);
+                    break;
+                case "pwd":
+                    handlePwd(parts);
+                    break;
+                case "cd":
+                    handleCD(parts);
+                    break;
+                default:
+                    String path = getExecutablePath(command);
+                    if (path != null) {
+                        try {
+                            ProcessBuilder pb = new ProcessBuilder(parts);
+                            pb.directory(new File(currentDirectory));
+                            if (redirectFile != null) {
+                                pb.redirectOutput(new File(redirectFile));
+                            } else {
+                                pb.redirectOutput(ProcessBuilder.Redirect.INHERIT);
+                            }
+                            pb.redirectError(ProcessBuilder.Redirect.INHERIT);
+                            pb.redirectInput(ProcessBuilder.Redirect.INHERIT);
+                            Process process = pb.start();
+                            process.waitFor();
+                        } catch (Exception e) {
+                            System.out.println(command + ": command not found");
+                        }
+                    } else {
                         System.out.println(command + ": command not found");
                     }
-                } else {
-                    System.out.println(command + ": command not found");
-                }
-                break;
+                    break;
+            }
+        } finally {
+            if (fileOut != null) {
+                fileOut.close();
+                System.setOut(originalOut);
+            }
         }
     }
 
@@ -149,12 +179,14 @@ public class Main {
         return null;
     }
 
-    private static java.util.List<String> parseCommandLine(String input) {
+    private static ParsedCommand parseCommandLine(String input) {
         java.util.List<String> args = new java.util.ArrayList<>();
         StringBuilder current = new StringBuilder();
         boolean inSingleQuotes = false;
         boolean inDoubleQuotes = false;
         boolean inArg = false;
+        String redirectFile = null;
+        boolean expectingRedirectFile = false;
 
         for (int i = 0; i < input.length(); i++) {
             char c = input.charAt(i);
@@ -196,9 +228,29 @@ public class Main {
                         current.append(input.charAt(i));
                         inArg = true;
                     }
+                } else if (c == '>') {
+                    if (inArg) {
+                        if (current.length() == 1 && current.charAt(0) == '1') {
+                            current.setLength(0);
+                        } else {
+                            if (expectingRedirectFile) {
+                                redirectFile = current.toString();
+                            } else {
+                                args.add(current.toString());
+                            }
+                            current.setLength(0);
+                        }
+                    }
+                    expectingRedirectFile = true;
+                    inArg = false;
                 } else if (Character.isWhitespace(c)) {
                     if (inArg) {
-                        args.add(current.toString());
+                        if (expectingRedirectFile) {
+                            redirectFile = current.toString();
+                            expectingRedirectFile = false;
+                        } else {
+                            args.add(current.toString());
+                        }
                         current.setLength(0);
                         inArg = false;
                     }
@@ -209,8 +261,22 @@ public class Main {
             }
         }
         if (inArg) {
-            args.add(current.toString());
+            if (expectingRedirectFile) {
+                redirectFile = current.toString();
+            } else {
+                args.add(current.toString());
+            }
         }
-        return args;
+        return new ParsedCommand(args, redirectFile);
+    }
+
+    private static class ParsedCommand {
+        public final java.util.List<String> args;
+        public final String redirectFile;
+
+        public ParsedCommand(java.util.List<String> args, String redirectFile) {
+            this.args = args;
+            this.redirectFile = redirectFile;
+        }
     }
 }
