@@ -19,14 +19,14 @@ public class Main {
             String[] parts = parsed.args.toArray(new String[0]);
             String command = parts[0];
             
-            executeCommand(command, parts, parsed.redirectFile, parsed.redirectStderrFile);
+            executeCommand(command, parts, parsed.redirectFile, parsed.redirectStderrFile, parsed.appendRedirect, parsed.appendStderrRedirect);
         }
         sc.close();
     }
 
     private static final java.util.List<String> BUILTINS = java.util.Arrays.asList("exit", "echo", "type", "pwd","cd");
 
-    private static void executeCommand(String command, String[] parts, String redirectFile, String redirectStderrFile) {
+    private static void executeCommand(String command, String[] parts, String redirectFile, String redirectStderrFile, boolean appendRedirect, boolean appendStderrRedirect) {
         java.io.PrintStream originalOut = System.out;
         java.io.PrintStream fileOut = null;
         if (redirectFile != null) {
@@ -36,7 +36,7 @@ public class Main {
                 if (parent != null && !parent.exists()) {
                     parent.mkdirs();
                 }
-                fileOut = new java.io.PrintStream(new java.io.FileOutputStream(file));
+                fileOut = new java.io.PrintStream(new java.io.FileOutputStream(file, appendRedirect));
                 System.setOut(fileOut);
             } catch (Exception e) {
                 System.err.println(e.getMessage());
@@ -53,7 +53,7 @@ public class Main {
                 if (parent != null && !parent.exists()) {
                     parent.mkdirs();
                 }
-                fileErr = new java.io.PrintStream(new java.io.FileOutputStream(file));
+                fileErr = new java.io.PrintStream(new java.io.FileOutputStream(file, appendStderrRedirect));
                 System.setErr(fileErr);
             } catch (Exception e) {
                 System.err.println(e.getMessage());
@@ -89,12 +89,20 @@ public class Main {
                             ProcessBuilder pb = new ProcessBuilder(parts);
                             pb.directory(new File(currentDirectory));
                             if (redirectFile != null) {
-                                pb.redirectOutput(new File(redirectFile));
+                                if (appendRedirect) {
+                                    pb.redirectOutput(ProcessBuilder.Redirect.appendTo(new File(redirectFile)));
+                                } else {
+                                    pb.redirectOutput(new File(redirectFile));
+                                }
                             } else {
                                 pb.redirectOutput(ProcessBuilder.Redirect.INHERIT);
                             }
                             if (redirectStderrFile != null) {
-                                pb.redirectError(new File(redirectStderrFile));
+                                if (appendStderrRedirect) {
+                                    pb.redirectError(ProcessBuilder.Redirect.appendTo(new File(redirectStderrFile)));
+                                } else {
+                                    pb.redirectError(new File(redirectStderrFile));
+                                }
                             } else {
                                 pb.redirectError(ProcessBuilder.Redirect.INHERIT);
                             }
@@ -218,6 +226,8 @@ public class Main {
         String redirectStderrFile = null;
         boolean expectingRedirectFile = false;
         boolean expectingStderrRedirectFile = false;
+        boolean appendRedirect = false;
+        boolean appendStderrRedirect = false;
 
         for (int i = 0; i < input.length(); i++) {
             char c = input.charAt(i);
@@ -260,13 +270,19 @@ public class Main {
                         inArg = true;
                     }
                 } else if (c == '>') {
+                    boolean isDouble = (i + 1 < input.length() && input.charAt(i + 1) == '>');
+                    if (isDouble) {
+                        i++;
+                    }
                     if (inArg) {
                         if (current.length() == 1 && current.charAt(0) == '1') {
                             current.setLength(0);
                             expectingRedirectFile = true;
+                            appendRedirect = isDouble;
                         } else if (current.length() == 1 && current.charAt(0) == '2') {
                             current.setLength(0);
                             expectingStderrRedirectFile = true;
+                            appendStderrRedirect = isDouble;
                         } else {
                             if (expectingRedirectFile) {
                                 redirectFile = current.toString();
@@ -279,9 +295,11 @@ public class Main {
                             }
                             current.setLength(0);
                             expectingRedirectFile = true;
+                            appendRedirect = isDouble;
                         }
                     } else {
                         expectingRedirectFile = true;
+                        appendRedirect = isDouble;
                     }
                     inArg = false;
                 } else if (Character.isWhitespace(c)) {
@@ -313,18 +331,22 @@ public class Main {
                 args.add(current.toString());
             }
         }
-        return new ParsedCommand(args, redirectFile, redirectStderrFile);
+        return new ParsedCommand(args, redirectFile, redirectStderrFile, appendRedirect, appendStderrRedirect);
     }
 
     private static class ParsedCommand {
         public final java.util.List<String> args;
         public final String redirectFile;
         public final String redirectStderrFile;
+        public final boolean appendRedirect;
+        public final boolean appendStderrRedirect;
 
-        public ParsedCommand(java.util.List<String> args, String redirectFile, String redirectStderrFile) {
+        public ParsedCommand(java.util.List<String> args, String redirectFile, String redirectStderrFile, boolean appendRedirect, boolean appendStderrRedirect) {
             this.args = args;
             this.redirectFile = redirectFile;
             this.redirectStderrFile = redirectStderrFile;
+            this.appendRedirect = appendRedirect;
+            this.appendStderrRedirect = appendStderrRedirect;
         }
     }
 }
