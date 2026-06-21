@@ -3,6 +3,7 @@ import java.io.File;
 
 public class Main {
     private static String currentDirectory = System.getProperty("user.dir");
+    private static int jobCounter = 0;
 
     public static void main(String[] args) throws Exception {
         Scanner sc = new Scanner(System.in);
@@ -19,14 +20,14 @@ public class Main {
             String[] parts = parsed.args.toArray(new String[0]);
             String command = parts[0];
             
-            executeCommand(command, parts, parsed.redirectFile, parsed.redirectStderrFile, parsed.appendRedirect, parsed.appendStderrRedirect);
+            executeCommand(command, parts, parsed.redirectFile, parsed.redirectStderrFile, parsed.appendRedirect, parsed.appendStderrRedirect, parsed.runInBackground);
         }
         sc.close();
     }
 
     private static final java.util.List<String> BUILTINS = java.util.Arrays.asList("exit", "echo", "type", "pwd","cd", "jobs");
 
-    private static void executeCommand(String command, String[] parts, String redirectFile, String redirectStderrFile, boolean appendRedirect, boolean appendStderrRedirect) {
+    private static void executeCommand(String command, String[] parts, String redirectFile, String redirectStderrFile, boolean appendRedirect, boolean appendStderrRedirect, boolean runInBackground) {
         java.io.PrintStream originalOut = System.out;
         java.io.PrintStream fileOut = null;
         if (redirectFile != null) {
@@ -111,7 +112,16 @@ public class Main {
                             }
                             pb.redirectInput(ProcessBuilder.Redirect.INHERIT);
                             Process process = pb.start();
-                            process.waitFor();
+                            if (runInBackground) {
+                                int jobNum;
+                                synchronized (Main.class) {
+                                    jobCounter++;
+                                    jobNum = jobCounter;
+                                }
+                                originalOut.println("[" + jobNum + "] " + process.pid());
+                            } else {
+                                process.waitFor();
+                            }
                         } catch (Exception e) {
                             System.out.println(command + ": command not found");
                         }
@@ -231,6 +241,7 @@ public class Main {
         boolean expectingStderrRedirectFile = false;
         boolean appendRedirect = false;
         boolean appendStderrRedirect = false;
+        boolean runInBackground = false;
 
         for (int i = 0; i < input.length(); i++) {
             char c = input.charAt(i);
@@ -305,6 +316,21 @@ public class Main {
                         appendRedirect = isDouble;
                     }
                     inArg = false;
+                } else if (c == '&') {
+                    if (inArg) {
+                        if (expectingRedirectFile) {
+                            redirectFile = current.toString();
+                            expectingRedirectFile = false;
+                        } else if (expectingStderrRedirectFile) {
+                            redirectStderrFile = current.toString();
+                            expectingStderrRedirectFile = false;
+                        } else {
+                            args.add(current.toString());
+                        }
+                        current.setLength(0);
+                    }
+                    runInBackground = true;
+                    inArg = false;
                 } else if (Character.isWhitespace(c)) {
                     if (inArg) {
                         if (expectingRedirectFile) {
@@ -334,7 +360,7 @@ public class Main {
                 args.add(current.toString());
             }
         }
-        return new ParsedCommand(args, redirectFile, redirectStderrFile, appendRedirect, appendStderrRedirect);
+        return new ParsedCommand(args, redirectFile, redirectStderrFile, appendRedirect, appendStderrRedirect, runInBackground);
     }
 
     private static class ParsedCommand {
@@ -343,13 +369,15 @@ public class Main {
         public final String redirectStderrFile;
         public final boolean appendRedirect;
         public final boolean appendStderrRedirect;
+        public final boolean runInBackground;
 
-        public ParsedCommand(java.util.List<String> args, String redirectFile, String redirectStderrFile, boolean appendRedirect, boolean appendStderrRedirect) {
+        public ParsedCommand(java.util.List<String> args, String redirectFile, String redirectStderrFile, boolean appendRedirect, boolean appendStderrRedirect, boolean runInBackground) {
             this.args = args;
             this.redirectFile = redirectFile;
             this.redirectStderrFile = redirectStderrFile;
             this.appendRedirect = appendRedirect;
             this.appendStderrRedirect = appendStderrRedirect;
+            this.runInBackground = runInBackground;
         }
     }
 }
