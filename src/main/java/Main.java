@@ -11,12 +11,14 @@ public class Main {
         public final long pid;
         public final String command;
         public String status;
+        public final Process process;
 
-        public Job(int jobNum, long pid, String command, String status) {
+        public Job(int jobNum, long pid, String command, String status, Process process) {
             this.jobNum = jobNum;
             this.pid = pid;
             this.command = command;
             this.status = status;
+            this.process = process;
         }
     }
 
@@ -134,7 +136,7 @@ public class Main {
                                     jobNum = jobCounter;
                                 }
                                 long pid = process.pid();
-                                Job job = new Job(jobNum, pid, jobCommand, "Running");
+                                Job job = new Job(jobNum, pid, jobCommand, "Running", process);
                                 synchronized (activeJobs) {
                                     activeJobs.add(job);
                                 }
@@ -164,17 +166,31 @@ public class Main {
 
     private static void handleJobs(java.io.PrintStream originalOut) {
         synchronized (activeJobs) {
+            java.util.List<Job> toRemove = new java.util.ArrayList<>();
             for (int i = 0; i < activeJobs.size(); i++) {
                 Job job = activeJobs.get(i);
+                if (job.process != null && !job.process.isAlive()) {
+                    job.status = "Done";
+                }
                 char marker = ' ';
                 if (i == activeJobs.size() - 1) {
                     marker = '+';
                 } else if (i == activeJobs.size() - 2) {
                     marker = '-';
                 }
+                String cmd = job.command;
+                if (job.status.equals("Done")) {
+                    if (cmd.endsWith(" &")) {
+                        cmd = cmd.substring(0, cmd.length() - 2).trim();
+                    } else if (cmd.endsWith("&")) {
+                        cmd = cmd.substring(0, cmd.length() - 1).trim();
+                    }
+                    toRemove.add(job);
+                }
                 String statusField = String.format("%-24s", job.status);
-                originalOut.println("[" + job.jobNum + "]" + marker + "  " + statusField + job.command);
+                originalOut.println("[" + job.jobNum + "]" + marker + "  " + statusField + cmd);
             }
+            activeJobs.removeAll(toRemove);
         }
     }
 
