@@ -31,13 +31,18 @@ public class Main {
             }
             String userinput = sc.nextLine();
             ParsedCommand parsed = parseCommandLine(userinput);
-            if (parsed.args.isEmpty()) {
+            if (parsed.commands.isEmpty() || parsed.commands.get(0).args.isEmpty()) {
                 continue;
             }
-            String[] parts = parsed.args.toArray(new String[0]);
-            String command = parts[0];
-            
-            executeCommand(command, parts, parsed.redirectFile, parsed.redirectStderrFile, parsed.appendRedirect, parsed.appendStderrRedirect, parsed.runInBackground, userinput.trim());
+
+            if (parsed.commands.size() > 1) {
+                executePipeline(parsed.commands, parsed.runInBackground, userinput.trim(), System.out);
+            } else {
+                CommandSpec spec = parsed.commands.get(0);
+                String[] parts = spec.args.toArray(new String[0]);
+                String command = parts[0];
+                executeCommand(command, parts, spec.redirectFile, spec.redirectStderrFile, spec.appendRedirect, spec.appendStderrRedirect, parsed.runInBackground, userinput.trim());
+            }
         }
         sc.close();
     }
@@ -158,6 +163,67 @@ public class Main {
                 fileErr.close();
                 System.setErr(originalErr);
             }
+        }
+    }
+
+    private static void executePipeline(java.util.List<CommandSpec> commands, boolean runInBackground, String jobCommand, java.io.PrintStream originalOut) {
+        java.util.List<ProcessBuilder> builders = new java.util.ArrayList<>();
+        for (int i = 0; i < commands.size(); i++) {
+            CommandSpec spec = commands.get(i);
+            String[] cmdParts = spec.args.toArray(new String[0]);
+            ProcessBuilder pb = new ProcessBuilder(cmdParts);
+            pb.directory(new File(currentDirectory));
+            
+            // Redirection logic for stdin
+            if (i == 0) {
+                pb.redirectInput(ProcessBuilder.Redirect.INHERIT);
+            }
+            
+            // Redirection logic for stdout
+            if (i == commands.size() - 1) {
+                if (spec.redirectFile != null) {
+                    if (spec.appendRedirect) {
+                        pb.redirectOutput(ProcessBuilder.Redirect.appendTo(new File(spec.redirectFile)));
+                    } else {
+                        pb.redirectOutput(new File(spec.redirectFile));
+                    }
+                } else {
+                    pb.redirectOutput(ProcessBuilder.Redirect.INHERIT);
+                }
+            }
+            
+            // Redirection logic for stderr
+            if (spec.redirectStderrFile != null) {
+                if (spec.appendStderrRedirect) {
+                    pb.redirectError(ProcessBuilder.Redirect.appendTo(new File(spec.redirectStderrFile)));
+                } else {
+                    pb.redirectError(new File(spec.redirectStderrFile));
+                }
+            } else {
+                pb.redirectError(ProcessBuilder.Redirect.INHERIT);
+            }
+            
+            builders.add(pb);
+        }
+
+        try {
+            java.util.List<Process> processes = ProcessBuilder.startPipeline(builders);
+            if (runInBackground) {
+                int jobNum;
+                synchronized (activeJobs) {
+                    jobNum = getNextJobNumber();
+                    Process lastProcess = processes.get(processes.size() - 1);
+                    Job job = new Job(jobNum, lastProcess.pid(), jobCommand, "Running", lastProcess);
+                    activeJobs.add(job);
+                }
+                originalOut.println("[" + jobNum + "] " + processes.get(processes.size() - 1).pid());
+            } else {
+                for (Process process : processes) {
+                    process.waitFor();
+                }
+            }
+        } catch (Exception e) {
+            System.err.println("Failed to start pipeline: " + e.getMessage());
         }
     }
 
@@ -322,18 +388,34 @@ public class Main {
         return null;
     }
 
+    public static class CommandSpec {
+        public final java.util.List<String> args = new java.util.ArrayList<>();
+        public String redirectFile = null;
+        public String redirectStderrFile = null;
+        public boolean appendRedirect = false;
+        public boolean appendStderrRedirect = false;
+    }
+
+    public static class ParsedCommand {
+        public final java.util.List<CommandSpec> commands;
+        public final boolean runInBackground;
+
+        public ParsedCommand(java.util.List<CommandSpec> commands, boolean runInBackground) {
+            this.commands = commands;
+            this.runInBackground = runInBackground;
+        }
+    }
+
     private static ParsedCommand parseCommandLine(String input) {
-        java.util.List<String> args = new java.util.ArrayList<>();
+        java.util.List<CommandSpec> commands = new java.util.ArrayList<>();
+        CommandSpec currentCmd = new CommandSpec();
+        
         StringBuilder current = new StringBuilder();
         boolean inSingleQuotes = false;
         boolean inDoubleQuotes = false;
         boolean inArg = false;
-        String redirectFile = null;
-        String redirectStderrFile = null;
         boolean expectingRedirectFile = false;
         boolean expectingStderrRedirectFile = false;
-        boolean appendRedirect = false;
-        boolean appendStderrRedirect = false;
         boolean runInBackground = false;
 
         for (int i = 0; i < input.length(); i++) {
@@ -376,6 +458,22 @@ public class Main {
                         current.append(input.charAt(i));
                         inArg = true;
                     }
+                } else if (c == '|') {
+                    if (inArg) {
+                        if (expectingRedirectFile) {
+                            currentCmd.redirectFile = current.toString();
+                            expectingRedirectFile = false;
+                        } else if (expectingStderrRedirectFile) {
+                            currentCmd.redirectStderrFile = current.toString();
+                            expectingStderrRedirectFile = false;
+                        } else {
+                            currentCmd.args.add(current.toString());
+                        }
+                        current.setLength(0);
+                    }
+                    commands.add(currentCmd);
+                    currentCmd = new CommandSpec();
+                    inArg = false;
                 } else if (c == '>') {
                     boolean isDouble = (i + 1 < input.length() && input.charAt(i + 1) == '>');
                     if (isDouble) {
@@ -385,40 +483,40 @@ public class Main {
                         if (current.length() == 1 && current.charAt(0) == '1') {
                             current.setLength(0);
                             expectingRedirectFile = true;
-                            appendRedirect = isDouble;
+                            currentCmd.appendRedirect = isDouble;
                         } else if (current.length() == 1 && current.charAt(0) == '2') {
                             current.setLength(0);
                             expectingStderrRedirectFile = true;
-                            appendStderrRedirect = isDouble;
+                            currentCmd.appendStderrRedirect = isDouble;
                         } else {
                             if (expectingRedirectFile) {
-                                redirectFile = current.toString();
+                                currentCmd.redirectFile = current.toString();
                                 expectingRedirectFile = false;
                             } else if (expectingStderrRedirectFile) {
-                                redirectStderrFile = current.toString();
+                                currentCmd.redirectStderrFile = current.toString();
                                 expectingStderrRedirectFile = false;
                             } else {
-                                args.add(current.toString());
+                                currentCmd.args.add(current.toString());
                             }
                             current.setLength(0);
                             expectingRedirectFile = true;
-                            appendRedirect = isDouble;
+                            currentCmd.appendRedirect = isDouble;
                         }
                     } else {
                         expectingRedirectFile = true;
-                        appendRedirect = isDouble;
+                        currentCmd.appendRedirect = isDouble;
                     }
                     inArg = false;
                 } else if (c == '&') {
                     if (inArg) {
                         if (expectingRedirectFile) {
-                            redirectFile = current.toString();
+                            currentCmd.redirectFile = current.toString();
                             expectingRedirectFile = false;
                         } else if (expectingStderrRedirectFile) {
-                            redirectStderrFile = current.toString();
+                            currentCmd.redirectStderrFile = current.toString();
                             expectingStderrRedirectFile = false;
                         } else {
-                            args.add(current.toString());
+                            currentCmd.args.add(current.toString());
                         }
                         current.setLength(0);
                     }
@@ -427,13 +525,13 @@ public class Main {
                 } else if (Character.isWhitespace(c)) {
                     if (inArg) {
                         if (expectingRedirectFile) {
-                            redirectFile = current.toString();
+                            currentCmd.redirectFile = current.toString();
                             expectingRedirectFile = false;
                         } else if (expectingStderrRedirectFile) {
-                            redirectStderrFile = current.toString();
+                            currentCmd.redirectStderrFile = current.toString();
                             expectingStderrRedirectFile = false;
                         } else {
-                            args.add(current.toString());
+                            currentCmd.args.add(current.toString());
                         }
                         current.setLength(0);
                         inArg = false;
@@ -446,31 +544,14 @@ public class Main {
         }
         if (inArg) {
             if (expectingRedirectFile) {
-                redirectFile = current.toString();
+                currentCmd.redirectFile = current.toString();
             } else if (expectingStderrRedirectFile) {
-                redirectStderrFile = current.toString();
+                currentCmd.redirectStderrFile = current.toString();
             } else {
-                args.add(current.toString());
+                currentCmd.args.add(current.toString());
             }
         }
-        return new ParsedCommand(args, redirectFile, redirectStderrFile, appendRedirect, appendStderrRedirect, runInBackground);
-    }
-
-    private static class ParsedCommand {
-        public final java.util.List<String> args;
-        public final String redirectFile;
-        public final String redirectStderrFile;
-        public final boolean appendRedirect;
-        public final boolean appendStderrRedirect;
-        public final boolean runInBackground;
-
-        public ParsedCommand(java.util.List<String> args, String redirectFile, String redirectStderrFile, boolean appendRedirect, boolean appendStderrRedirect, boolean runInBackground) {
-            this.args = args;
-            this.redirectFile = redirectFile;
-            this.redirectStderrFile = redirectStderrFile;
-            this.appendRedirect = appendRedirect;
-            this.appendStderrRedirect = appendStderrRedirect;
-            this.runInBackground = runInBackground;
-        }
+        commands.add(currentCmd);
+        return new ParsedCommand(commands, runInBackground);
     }
 }
