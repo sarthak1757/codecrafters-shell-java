@@ -49,6 +49,33 @@ public class Main {
 
     private static final java.util.List<String> BUILTINS = java.util.Arrays.asList("exit", "echo", "type", "pwd","cd", "jobs");
 
+    private static boolean isBuiltin(String command) {
+        return BUILTINS.contains(command);
+    }
+
+    private static void executeBuiltin(String command, String[] parts, java.io.PrintStream originalOut) {
+        switch (command) {
+            case "exit":
+                handleExit(parts);
+                break;
+            case "echo":
+                handleEcho(parts);
+                break;
+            case "type":
+                handleType(parts);
+                break;
+            case "pwd":
+                handlePwd(parts);
+                break;
+            case "cd":
+                handleCD(parts);
+                break;
+            case "jobs":
+                handleJobs(originalOut);
+                break;
+        }
+    }
+
     private static void executeCommand(String command, String[] parts, String redirectFile, String redirectStderrFile, boolean appendRedirect, boolean appendStderrRedirect, boolean runInBackground, String jobCommand) {
         java.io.PrintStream originalOut = System.out;
         java.io.PrintStream fileOut = null;
@@ -89,70 +116,52 @@ public class Main {
         }
 
         try {
-            switch (command) {
-                case "exit":
-                    handleExit(parts);
-                    break;
-                case "echo":
-                    handleEcho(parts);
-                    break;
-                case "type":
-                    handleType(parts);
-                    break;
-                case "pwd":
-                    handlePwd(parts);
-                    break;
-                case "cd":
-                    handleCD(parts);
-                    break;
-                case "jobs":
-                    handleJobs(originalOut);
-                    break;
-                default:
-                    String path = getExecutablePath(command);
-                    if (path != null) {
-                        try {
-                            ProcessBuilder pb = new ProcessBuilder(parts);
-                            pb.directory(new File(currentDirectory));
-                            if (redirectFile != null) {
-                                if (appendRedirect) {
-                                    pb.redirectOutput(ProcessBuilder.Redirect.appendTo(new File(redirectFile)));
-                                } else {
-                                    pb.redirectOutput(new File(redirectFile));
-                                }
+            if (isBuiltin(command)) {
+                executeBuiltin(command, parts, originalOut);
+            } else {
+                String path = getExecutablePath(command);
+                if (path != null) {
+                    try {
+                        ProcessBuilder pb = new ProcessBuilder(parts);
+                        pb.directory(new File(currentDirectory));
+                        if (redirectFile != null) {
+                            if (appendRedirect) {
+                                pb.redirectOutput(ProcessBuilder.Redirect.appendTo(new File(redirectFile)));
                             } else {
-                                pb.redirectOutput(ProcessBuilder.Redirect.INHERIT);
+                                pb.redirectOutput(new File(redirectFile));
                             }
-                            if (redirectStderrFile != null) {
-                                if (appendStderrRedirect) {
-                                    pb.redirectError(ProcessBuilder.Redirect.appendTo(new File(redirectStderrFile)));
-                                } else {
-                                    pb.redirectError(new File(redirectStderrFile));
-                                }
-                            } else {
-                                pb.redirectError(ProcessBuilder.Redirect.INHERIT);
-                            }
-                            pb.redirectInput(ProcessBuilder.Redirect.INHERIT);
-                            Process process = pb.start();
-                            if (runInBackground) {
-                                int jobNum;
-                                long pid = process.pid();
-                                synchronized (activeJobs) {
-                                    jobNum = getNextJobNumber();
-                                    Job job = new Job(jobNum, pid, jobCommand, "Running", process);
-                                    activeJobs.add(job);
-                                }
-                                originalOut.println("[" + jobNum + "] " + pid);
-                            } else {
-                                process.waitFor();
-                            }
-                        } catch (Exception e) {
-                            System.out.println(command + ": command not found");
+                        } else {
+                            pb.redirectOutput(ProcessBuilder.Redirect.INHERIT);
                         }
-                    } else {
+                        if (redirectStderrFile != null) {
+                            if (appendStderrRedirect) {
+                                pb.redirectError(ProcessBuilder.Redirect.appendTo(new File(redirectStderrFile)));
+                            } else {
+                                pb.redirectError(new File(redirectStderrFile));
+                            }
+                        } else {
+                            pb.redirectError(ProcessBuilder.Redirect.INHERIT);
+                        }
+                        pb.redirectInput(ProcessBuilder.Redirect.INHERIT);
+                        Process process = pb.start();
+                        if (runInBackground) {
+                            int jobNum;
+                            long pid = process.pid();
+                            synchronized (activeJobs) {
+                                jobNum = getNextJobNumber();
+                                Job job = new Job(jobNum, pid, jobCommand, "Running", process);
+                                activeJobs.add(job);
+                            }
+                            originalOut.println("[" + jobNum + "] " + pid);
+                        } else {
+                            process.waitFor();
+                        }
+                    } catch (Exception e) {
                         System.out.println(command + ": command not found");
                     }
-                    break;
+                } else {
+                    System.out.println(command + ": command not found");
+                }
             }
         } finally {
             if (fileOut != null) {
@@ -166,7 +175,54 @@ public class Main {
         }
     }
 
+    public static class ThreadProcess extends Process {
+        private final Thread thread;
+        private final long pid;
+        private boolean exited = false;
+        private int exitCode = 0;
+
+        public ThreadProcess(Thread thread, long pid) {
+            this.thread = thread;
+            this.pid = pid;
+        }
+
+        public void setExited(int exitCode) {
+            this.exited = true;
+            this.exitCode = exitCode;
+        }
+
+        @Override public java.io.OutputStream getOutputStream() { return null; }
+        @Override public java.io.InputStream getInputStream() { return null; }
+        @Override public java.io.InputStream getErrorStream() { return null; }
+        @Override public int waitFor() throws InterruptedException { thread.join(); return exitCode; }
+        @Override public boolean waitFor(long timeout, java.util.concurrent.TimeUnit unit) throws InterruptedException {
+            thread.join(unit.toMillis(timeout));
+            return !thread.isAlive();
+        }
+        @Override public int exitValue() { if (thread.isAlive()) throw new IllegalThreadStateException(); return exitCode; }
+        @Override public void destroy() { thread.interrupt(); }
+        @Override public Process destroyForcibly() { destroy(); return this; }
+        @Override public boolean isAlive() { return thread.isAlive(); }
+        @Override public long pid() { return pid; }
+    }
+
     private static void executePipeline(java.util.List<CommandSpec> commands, boolean runInBackground, String jobCommand, java.io.PrintStream originalOut) {
+        boolean hasBuiltin = false;
+        for (CommandSpec spec : commands) {
+            if (!spec.args.isEmpty() && isBuiltin(spec.args.get(0))) {
+                hasBuiltin = true;
+                break;
+            }
+        }
+
+        if (hasBuiltin) {
+            executeMixedPipeline(commands, runInBackground, jobCommand, originalOut);
+        } else {
+            executeExternalPipeline(commands, runInBackground, jobCommand, originalOut);
+        }
+    }
+
+    private static void executeExternalPipeline(java.util.List<CommandSpec> commands, boolean runInBackground, String jobCommand, java.io.PrintStream originalOut) {
         java.util.List<ProcessBuilder> builders = new java.util.ArrayList<>();
         for (int i = 0; i < commands.size(); i++) {
             CommandSpec spec = commands.get(i);
@@ -224,6 +280,182 @@ public class Main {
             }
         } catch (Exception e) {
             System.err.println("Failed to start pipeline: " + e.getMessage());
+        }
+    }
+
+    private static void executeMixedPipeline(java.util.List<CommandSpec> commands, boolean runInBackground, String jobCommand, java.io.PrintStream originalOut) {
+        if (runInBackground) {
+            final long dummyPid = (long) (Math.random() * 100000) + 10000;
+            Thread thread = new Thread(() -> {
+                try {
+                    runMixedPipelineSequentially(commands, originalOut);
+                } catch (Exception e) {
+                    System.err.println("Pipeline background execution error: " + e.getMessage());
+                }
+            });
+            ThreadProcess threadProcess = new ThreadProcess(thread, dummyPid);
+            int jobNum;
+            synchronized (activeJobs) {
+                jobNum = getNextJobNumber();
+                Job job = new Job(jobNum, dummyPid, jobCommand, "Running", threadProcess);
+                activeJobs.add(job);
+            }
+            originalOut.println("[" + jobNum + "] " + dummyPid);
+            thread.start();
+        } else {
+            try {
+                runMixedPipelineSequentially(commands, originalOut);
+            } catch (Exception e) {
+                System.err.println("Pipeline execution error: " + e.getMessage());
+            }
+        }
+    }
+
+    private static void runMixedPipelineSequentially(java.util.List<CommandSpec> commands, java.io.PrintStream originalOut) throws Exception {
+        java.io.InputStream originalIn = System.in;
+        java.io.PrintStream originalSystemOut = System.out;
+        java.io.PrintStream originalSystemErr = System.err;
+
+        java.util.List<File> tempFiles = new java.util.ArrayList<>();
+        for (int i = 0; i < commands.size() - 1; i++) {
+            tempFiles.add(File.createTempFile("shell_pipe_", ".tmp"));
+        }
+
+        try {
+            for (int i = 0; i < commands.size(); i++) {
+                CommandSpec spec = commands.get(i);
+                String[] parts = spec.args.toArray(new String[0]);
+                String command = parts[0];
+
+                // Determine input source for this stage
+                java.io.InputStream stageIn = originalIn;
+                File stageInFile = null;
+                if (i > 0) {
+                    stageInFile = tempFiles.get(i - 1);
+                    stageIn = new java.io.FileInputStream(stageInFile);
+                }
+
+                // Determine output destination for this stage
+                boolean isLast = (i == commands.size() - 1);
+                java.io.PrintStream stageOut = originalSystemOut;
+                java.io.PrintStream fileOut = null;
+                File stageOutFile = null;
+
+                if (isLast) {
+                    if (spec.redirectFile != null) {
+                        File file = new File(spec.redirectFile);
+                        File parent = file.getParentFile();
+                        if (parent != null && !parent.exists()) {
+                            parent.mkdirs();
+                        }
+                        fileOut = new java.io.PrintStream(new java.io.FileOutputStream(file, spec.appendRedirect));
+                        stageOut = fileOut;
+                    }
+                } else {
+                    stageOutFile = tempFiles.get(i);
+                    fileOut = new java.io.PrintStream(new java.io.FileOutputStream(stageOutFile));
+                    stageOut = fileOut;
+                }
+
+                // Stderr destination for this stage
+                java.io.PrintStream stageErr = originalSystemErr;
+                java.io.PrintStream fileErr = null;
+                if (spec.redirectStderrFile != null) {
+                    File file = new File(spec.redirectStderrFile);
+                    File parent = file.getParentFile();
+                    if (parent != null && !parent.exists()) {
+                        parent.mkdirs();
+                    }
+                    fileErr = new java.io.PrintStream(new java.io.FileOutputStream(file, spec.appendStderrRedirect));
+                    stageErr = fileErr;
+                }
+
+                if (isBuiltin(command)) {
+                    // Set streams
+                    if (stageInFile != null) {
+                        System.setIn(stageIn);
+                    }
+                    System.setOut(stageOut);
+                    System.setErr(stageErr);
+
+                    try {
+                        executeBuiltin(command, parts, originalOut);
+                    } finally {
+                        // Restore streams immediately after builtin executes
+                        System.setIn(originalIn);
+                        System.setOut(originalSystemOut);
+                        System.setErr(originalSystemErr);
+                        if (stageIn != originalIn) {
+                            stageIn.close();
+                        }
+                        if (fileOut != null) {
+                            fileOut.close();
+                        }
+                        if (fileErr != null) {
+                            fileErr.close();
+                        }
+                    }
+                } else {
+                    // External command execution
+                    String path = getExecutablePath(command);
+                    if (path == null) {
+                        System.err.println(command + ": command not found");
+                        continue;
+                    }
+                    ProcessBuilder pb = new ProcessBuilder(parts);
+                    pb.directory(new File(currentDirectory));
+
+                    if (stageInFile != null) {
+                        pb.redirectInput(stageInFile);
+                    } else {
+                        pb.redirectInput(ProcessBuilder.Redirect.INHERIT);
+                    }
+
+                    if (isLast) {
+                        if (spec.redirectFile != null) {
+                            if (spec.appendRedirect) {
+                                pb.redirectOutput(ProcessBuilder.Redirect.appendTo(new File(spec.redirectFile)));
+                            } else {
+                                pb.redirectOutput(new File(spec.redirectFile));
+                            }
+                        } else {
+                            pb.redirectOutput(ProcessBuilder.Redirect.INHERIT);
+                        }
+                    } else {
+                        pb.redirectOutput(stageOutFile);
+                    }
+
+                    if (spec.redirectStderrFile != null) {
+                        if (spec.appendStderrRedirect) {
+                            pb.redirectError(ProcessBuilder.Redirect.appendTo(new File(spec.redirectStderrFile)));
+                        } else {
+                            pb.redirectError(new File(spec.redirectStderrFile));
+                        }
+                    } else {
+                        pb.redirectError(ProcessBuilder.Redirect.INHERIT);
+                    }
+
+                    Process process = pb.start();
+                    process.waitFor();
+
+                    if (stageIn != originalIn) {
+                        stageIn.close();
+                    }
+                    if (fileOut != null) {
+                        fileOut.close();
+                    }
+                    if (fileErr != null) {
+                        fileErr.close();
+                    }
+                }
+            }
+        } finally {
+            // Delete temp files
+            for (File file : tempFiles) {
+                if (file.exists()) {
+                    file.delete();
+                }
+            }
         }
     }
 
