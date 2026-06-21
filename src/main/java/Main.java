@@ -24,7 +24,7 @@ public class Main {
         sc.close();
     }
 
-    private static final java.util.List<String> BUILTINS = java.util.Arrays.asList("exit", "echo", "type", "pwd","cd");
+    private static final java.util.List<String> BUILTINS = java.util.Arrays.asList("exit", "echo", "type", "pwd","cd", "jobs");
 
     private static void executeCommand(String command, String[] parts, String redirectFile, String redirectStderrFile, boolean appendRedirect, boolean appendStderrRedirect) {
         java.io.PrintStream originalOut = System.out;
@@ -81,6 +81,9 @@ public class Main {
                     break;
                 case "cd":
                     handleCD(parts);
+                    break;
+                case "jobs":
+                    // Empty implementation
                     break;
                 default:
                     String path = getExecutablePath(command);
