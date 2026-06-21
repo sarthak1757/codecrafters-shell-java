@@ -25,6 +25,7 @@ public class Main {
     public static void main(String[] args) throws Exception {
         Scanner sc = new Scanner(System.in);
         while (true) {
+            reapExitedJobs(System.out);
             System.out.print("$ ");
             if (!sc.hasNextLine()) {
                 break;
@@ -189,6 +190,37 @@ public class Main {
                 }
                 String statusField = String.format("%-24s", job.status);
                 originalOut.println("[" + job.jobNum + "]" + marker + "  " + statusField + cmd);
+            }
+            activeJobs.removeAll(toRemove);
+        }
+    }
+
+    private static void reapExitedJobs(java.io.PrintStream originalOut) {
+        synchronized (activeJobs) {
+            java.util.List<Job> toRemove = new java.util.ArrayList<>();
+            for (int i = 0; i < activeJobs.size(); i++) {
+                Job job = activeJobs.get(i);
+                if (job.process != null && !job.process.isAlive()) {
+                    job.status = "Done";
+                    
+                    char marker = ' ';
+                    if (i == activeJobs.size() - 1) {
+                        marker = '+';
+                    } else if (i == activeJobs.size() - 2) {
+                        marker = '-';
+                    }
+                    
+                    String cmd = job.command;
+                    if (cmd.endsWith(" &")) {
+                        cmd = cmd.substring(0, cmd.length() - 2).trim();
+                    } else if (cmd.endsWith("&")) {
+                        cmd = cmd.substring(0, cmd.length() - 1).trim();
+                    }
+                    
+                    String statusField = String.format("%-24s", job.status);
+                    originalOut.println("[" + job.jobNum + "]" + marker + "  " + statusField + cmd);
+                    toRemove.add(job);
+                }
             }
             activeJobs.removeAll(toRemove);
         }
