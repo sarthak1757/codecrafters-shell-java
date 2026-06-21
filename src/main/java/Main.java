@@ -4,6 +4,21 @@ import java.io.File;
 public class Main {
     private static String currentDirectory = System.getProperty("user.dir");
     private static int jobCounter = 0;
+    private static final java.util.List<Job> activeJobs = new java.util.ArrayList<>();
+
+    private static class Job {
+        public final int jobNum;
+        public final long pid;
+        public final String command;
+        public String status;
+
+        public Job(int jobNum, long pid, String command, String status) {
+            this.jobNum = jobNum;
+            this.pid = pid;
+            this.command = command;
+            this.status = status;
+        }
+    }
 
     public static void main(String[] args) throws Exception {
         Scanner sc = new Scanner(System.in);
@@ -20,14 +35,14 @@ public class Main {
             String[] parts = parsed.args.toArray(new String[0]);
             String command = parts[0];
             
-            executeCommand(command, parts, parsed.redirectFile, parsed.redirectStderrFile, parsed.appendRedirect, parsed.appendStderrRedirect, parsed.runInBackground);
+            executeCommand(command, parts, parsed.redirectFile, parsed.redirectStderrFile, parsed.appendRedirect, parsed.appendStderrRedirect, parsed.runInBackground, userinput.trim());
         }
         sc.close();
     }
 
     private static final java.util.List<String> BUILTINS = java.util.Arrays.asList("exit", "echo", "type", "pwd","cd", "jobs");
 
-    private static void executeCommand(String command, String[] parts, String redirectFile, String redirectStderrFile, boolean appendRedirect, boolean appendStderrRedirect, boolean runInBackground) {
+    private static void executeCommand(String command, String[] parts, String redirectFile, String redirectStderrFile, boolean appendRedirect, boolean appendStderrRedirect, boolean runInBackground, String jobCommand) {
         java.io.PrintStream originalOut = System.out;
         java.io.PrintStream fileOut = null;
         if (redirectFile != null) {
@@ -84,7 +99,7 @@ public class Main {
                     handleCD(parts);
                     break;
                 case "jobs":
-                    // Empty implementation
+                    handleJobs(originalOut);
                     break;
                 default:
                     String path = getExecutablePath(command);
@@ -118,7 +133,12 @@ public class Main {
                                     jobCounter++;
                                     jobNum = jobCounter;
                                 }
-                                originalOut.println("[" + jobNum + "] " + process.pid());
+                                long pid = process.pid();
+                                Job job = new Job(jobNum, pid, jobCommand, "Running");
+                                synchronized (activeJobs) {
+                                    activeJobs.add(job);
+                                }
+                                originalOut.println("[" + jobNum + "] " + pid);
                             } else {
                                 process.waitFor();
                             }
@@ -138,6 +158,22 @@ public class Main {
             if (fileErr != null) {
                 fileErr.close();
                 System.setErr(originalErr);
+            }
+        }
+    }
+
+    private static void handleJobs(java.io.PrintStream originalOut) {
+        synchronized (activeJobs) {
+            for (int i = 0; i < activeJobs.size(); i++) {
+                Job job = activeJobs.get(i);
+                char marker = ' ';
+                if (i == activeJobs.size() - 1) {
+                    marker = '+';
+                } else if (i == activeJobs.size() - 2) {
+                    marker = '-';
+                }
+                String statusField = String.format("%-24s", job.status);
+                originalOut.println("[" + job.jobNum + "]" + marker + "  " + statusField + job.command);
             }
         }
     }
