@@ -3,7 +3,6 @@ import java.io.File;
 
 public class Main {
     private static String currentDirectory = System.getProperty("user.dir");
-    private static int jobCounter = 0;
     private static final java.util.List<Job> activeJobs = new java.util.ArrayList<>();
 
     private static class Job {
@@ -132,13 +131,10 @@ public class Main {
                             Process process = pb.start();
                             if (runInBackground) {
                                 int jobNum;
-                                synchronized (Main.class) {
-                                    jobCounter++;
-                                    jobNum = jobCounter;
-                                }
                                 long pid = process.pid();
-                                Job job = new Job(jobNum, pid, jobCommand, "Running", process);
                                 synchronized (activeJobs) {
+                                    jobNum = getNextJobNumber();
+                                    Job job = new Job(jobNum, pid, jobCommand, "Running", process);
                                     activeJobs.add(job);
                                 }
                                 originalOut.println("[" + jobNum + "] " + pid);
@@ -224,6 +220,19 @@ public class Main {
             }
             activeJobs.removeAll(toRemove);
         }
+    }
+
+    private static int getNextJobNumber() {
+        if (activeJobs.isEmpty()) {
+            return 1;
+        }
+        int max = 0;
+        for (Job job : activeJobs) {
+            if (job.jobNum > max) {
+                max = job.jobNum;
+            }
+        }
+        return max + 1;
     }
 
     private static void handleExit(String[] parts) {
